@@ -1,6 +1,5 @@
 import os
 import logging
-import asyncio
 from typing import Dict, Optional
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
@@ -12,7 +11,6 @@ from telegram.ext import (
     filters
 )
 from googletrans import Translator, LANGUAGES
-from functools import wraps
 
 # ==================== CONFIGURATION ====================
 
@@ -32,7 +30,7 @@ if not BOT_TOKEN:
 # Initialize translator
 translator = Translator()
 
-# User session storage (in-memory, resets on bot restart)
+# User session storage
 user_languages: Dict[int, str] = {}
 
 # ==================== LANGUAGE DATA ====================
@@ -150,7 +148,7 @@ LANGUAGE_CODES = {
     "zu": "Zulu"
 }
 
-# Common languages for quick selection
+# Quick access languages
 QUICK_LANGUAGES = [
     ("🇬🇧 English", "en"),
     ("🇪🇸 Spanish", "es"),
@@ -169,20 +167,14 @@ QUICK_LANGUAGES = [
 # ==================== HELPER FUNCTIONS ====================
 
 def get_language_name(code: str) -> str:
-    """Get language name from code, with fallback."""
+    """Get language name from code with fallback."""
     return LANGUAGE_CODES.get(code, LANGUAGES.get(code, code))
 
 def get_user_language(user_id: int) -> str:
     """Get user's preferred language or default to English."""
     return user_languages.get(user_id, "en")
 
-def set_user_language(user_id: int, lang_code: str) -> None:
-    """Set user's preferred language."""
-    if lang_code in LANGUAGE_CODES:
-        user_languages[user_id] = lang_code
-        logger.info(f"User {user_id} set language to {lang_code}")
-
-# ==================== BOT COMMAND HANDLERS ====================
+# ==================== COMMAND HANDLERS ====================
 
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Handle /start command."""
@@ -246,8 +238,6 @@ async def about_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
 async def setlang_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Handle /setlang command with inline keyboard."""
     keyboard = []
-    
-    # Add quick language buttons (3 per row)
     row = []
     for i, (label, code) in enumerate(QUICK_LANGUAGES):
         row.append(InlineKeyboardButton(label, callback_data=f"setlang_{code}"))
@@ -255,9 +245,7 @@ async def setlang_command(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
             keyboard.append(row)
             row = []
     
-    # Add "See All" button
     keyboard.append([InlineKeyboardButton("📋 See All 69 Languages", callback_data="show_all_langs")])
-    
     reply_markup = InlineKeyboardMarkup(keyboard)
     
     current_lang = get_user_language(update.effective_user.id)
@@ -273,15 +261,12 @@ async def setlang_command(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
 
 async def langs_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Handle /langs command - show all languages."""
-    # Create paginated language list
     lang_list = []
     for code, name in sorted(LANGUAGE_CODES.items()):
         lang_list.append(f"`{code}` - {name}")
     
-    # Split into chunks of 25 to avoid message limits
     chunks = [lang_list[i:i+25] for i in range(0, len(lang_list), 25)]
     
-    # Send first chunk with navigation
     text = f"🌐 *Supported Languages ({len(LANGUAGE_CODES)} total)*\n\n"
     text += "\n".join(chunks[0])
     text += f"\n\n📌 *Page 1/{len(chunks)}*"
@@ -293,7 +278,7 @@ async def langs_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     else:
         await update.message.reply_text(text, parse_mode="Markdown")
 
-# ==================== CALLBACK QUERY HANDLERS ====================
+# ==================== CALLBACK HANDLERS ====================
 
 async def set_language_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Handle language selection callback."""
@@ -304,8 +289,8 @@ async def set_language_callback(update: Update, context: ContextTypes.DEFAULT_TY
     lang_name = get_language_name(lang_code)
     user_id = query.from_user.id
     
-    # Save user preference
-    set_user_language(user_id, lang_code)
+    user_languages[user_id] = lang_code
+    logger.info(f"User {user_id} set language to {lang_code}")
     
     await query.edit_message_text(
         f"✅ *Language Updated!*\n\n"
@@ -320,15 +305,12 @@ async def show_all_languages_callback(update: Update, context: ContextTypes.DEFA
     query = update.callback_query
     await query.answer()
     
-    # Create compact language list
     lang_list = []
     for code, name in sorted(LANGUAGE_CODES.items()):
         lang_list.append(f"`{code}` - {name}")
     
-    # Split into chunks
     chunks = [lang_list[i:i+30] for i in range(0, len(lang_list), 30)]
     
-    # Send first chunk
     text = f"🌐 *All 69 Languages*\n\n"
     text += "\n".join(chunks[0])
     text += f"\n\n📌 *Page 1/{len(chunks)}*"
@@ -345,23 +327,19 @@ async def paginate_languages(update: Update, context: ContextTypes.DEFAULT_TYPE)
     query = update.callback_query
     await query.answer()
     
-    # Parse page number from callback data
     page = int(query.data.split("_")[-1])
     source = query.data.replace(f"_page_{page}", "")
     
-    # Get all languages
     lang_list = []
     for code, name in sorted(LANGUAGE_CODES.items()):
         lang_list.append(f"`{code}` - {name}")
     
-    # Calculate pagination
     items_per_page = 25 if source == "lang" else 30
     total_pages = (len(lang_list) + items_per_page - 1) // items_per_page
     
     start_idx = (page - 1) * items_per_page
     end_idx = min(start_idx + items_per_page, len(lang_list))
     
-    # Build response
     if source == "lang":
         title = "🌐 *Supported Languages*"
     else:
@@ -371,7 +349,6 @@ async def paginate_languages(update: Update, context: ContextTypes.DEFAULT_TYPE)
     text += "\n".join(lang_list[start_idx:end_idx])
     text += f"\n\n📌 *Page {page}/{total_pages}*"
     
-    # Navigation buttons
     keyboard = []
     nav_row = []
     
@@ -384,39 +361,32 @@ async def paginate_languages(update: Update, context: ContextTypes.DEFAULT_TYPE)
         keyboard.append(nav_row)
     
     reply_markup = InlineKeyboardMarkup(keyboard) if keyboard else None
-    
     await query.edit_message_text(text, parse_mode="Markdown", reply_markup=reply_markup)
 
-# ==================== MESSAGE HANDLERS ====================
+# ==================== MESSAGE HANDLER ====================
 
 async def handle_translation(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Handle text messages and translate them."""
     user_id = update.effective_user.id
     text = update.message.text.strip()
     
-    # Ignore empty messages
     if not text:
         await update.message.reply_text("❌ Please send some text to translate.")
         return
     
-    # Get user's target language
     target_lang = get_user_language(user_id)
     target_name = get_language_name(target_lang)
     
-    # Show typing indicator
     await update.message.chat.send_action(action="typing")
     
     try:
-        # Detect source language
         detection = translator.detect(text)
         source_lang = detection.lang
         source_name = get_language_name(source_lang)
         
-        # Translate
         translation = translator.translate(text, dest=target_lang)
         translated_text = translation.text
         
-        # Build response
         response = (
             f"🔍 *Detected:* {source_name}\n"
             f"🎯 *Target:* {target_name}\n"
@@ -424,7 +394,6 @@ async def handle_translation(update: Update, context: ContextTypes.DEFAULT_TYPE)
             f"{translated_text}"
         )
         
-        # Add note if source and target are the same
         if source_lang == target_lang:
             response += f"\n\nℹ️ *Note:* Source and target languages are the same. Use /setlang to change target."
         
@@ -433,12 +402,11 @@ async def handle_translation(update: Update, context: ContextTypes.DEFAULT_TYPE)
     except Exception as e:
         logger.error(f"Translation error for user {user_id}: {e}")
         error_message = (
-            "❌ *Translation Failed*\n\n"
-            "I couldn't translate that text. Please try:\n"
-            "• Sending shorter text\n"
-            "• Checking if the text is valid\n"
-            "• Using /setlang to select a different target language\n\n"
-            f"Error: `{str(e)[:100]}`"
+            f"❌ *Translation Failed*\n\n"
+            f"I couldn't translate that text. Please try:\n"
+            f"• Sending shorter text\n"
+            f"• Checking if the text is valid\n"
+            f"• Using /setlang to select a different target language"
         )
         await update.message.reply_text(error_message, parse_mode="Markdown")
 
@@ -451,7 +419,7 @@ async def handle_unknown(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         parse_mode="Markdown"
     )
 
-# ==================== ERROR HANDLING ====================
+# ==================== ERROR HANDLER ====================
 
 async def error_handler(update: Optional[Update], context: ContextTypes.DEFAULT_TYPE) -> None:
     """Handle errors gracefully."""
@@ -464,44 +432,38 @@ async def error_handler(update: Optional[Update], context: ContextTypes.DEFAULT_
             parse_mode="Markdown"
         )
 
-# ==================== MAIN APPLICATION ====================
+# ==================== MAIN ====================
 
 def main() -> None:
     """Start the bot application."""
     try:
-        # Create application
         application = Application.builder().token(BOT_TOKEN).build()
         
-        # ========== COMMAND HANDLERS ==========
+        # Command handlers
         application.add_handler(CommandHandler("start", start_command))
         application.add_handler(CommandHandler("help", help_command))
         application.add_handler(CommandHandler("about", about_command))
         application.add_handler(CommandHandler("setlang", setlang_command))
         application.add_handler(CommandHandler("langs", langs_command))
         
-        # ========== CALLBACK HANDLERS ==========
+        # Callback handlers
         application.add_handler(CallbackQueryHandler(set_language_callback, pattern="^setlang_"))
         application.add_handler(CallbackQueryHandler(show_all_languages_callback, pattern="^show_all_langs$"))
         application.add_handler(CallbackQueryHandler(paginate_languages, pattern="^lang_page_"))
         application.add_handler(CallbackQueryHandler(paginate_languages, pattern="^all_lang_page_"))
         
-        # ========== MESSAGE HANDLERS ==========
+        # Message handlers
         application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_translation))
         application.add_handler(MessageHandler(filters.COMMAND, handle_unknown))
         
-        # ========== ERROR HANDLER ==========
+        # Error handler
         application.add_error_handler(error_handler)
         
-        # ========== START BOT ==========
         logger.info("🚀 Language69 Translator Bot is starting...")
         logger.info(f"📊 Supported Languages: {len(LANGUAGE_CODES)}")
         logger.info(f"🤖 Bot Username: @language69translator_bot")
         
-        # Start polling
-        application.run_polling(
-            allowed_updates=Update.ALL_TYPES,
-            drop_pending_updates=True
-        )
+        application.run_polling(allowed_updates=Update.ALL_TYPES)
         
     except Exception as e:
         logger.error(f"Failed to start bot: {e}")
